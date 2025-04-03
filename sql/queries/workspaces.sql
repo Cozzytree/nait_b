@@ -32,3 +32,7 @@ FROM workspace_members AS mem
 LEFT JOIN users as u ON mem.user_id = u.id
 WHERE workspace_id = $1
 ORDER BY mem.created_at DESC;
+
+-- name: GetWorkspaceUserRole :one
+SELECT * FROM workspace_members
+WHERE user_id = $1 AND workspace_id = $2;

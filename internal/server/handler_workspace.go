@@ -1,8 +1,8 @@
 package server
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/Cozzytree/nait/internal/database"
@@ -69,6 +69,26 @@ func (ms *my_server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Reques
 
 	ResponseWithJson(w, Response{
 		Data:   nil,
+		Status: 200,
+	})
+}
+
+func (ms *my_server) handleCreateWorkspaceMember(w http.ResponseWriter, r *http.Request) {}
+
+func (ms *my_server) handleGetWorkspaceMembers(
+	w http.ResponseWriter, r *http.Request, _ database.User,
+) {
+	id := r.PathValue("workspace_id")
+	workspace_id, _ := uuid.Parse(id)
+
+	workspaceMembers, err := ms.db.GetWorkspaceMembers(r.Context(), workspace_id)
+	if err != nil {
+		ResponseWithError(w, "error getting workspace members", http.StatusInternalServerError)
+		return
+	}
+
+	ResponseWithJson(w, Response{
+		Data:   model.DatabaseWorkspaceMtoWorkspaceM(workspaceMembers),
 		Status: 200,
 	})
 }

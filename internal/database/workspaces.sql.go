@@ -169,6 +169,29 @@ func (q *Queries) GetWorkspaceMembers(ctx context.Context, workspaceID uuid.UUID
 	return items, nil
 }
 
+const getWorkspaceUserRole = `-- name: GetWorkspaceUserRole :one
+SELECT user_id, workspace_id, role, created_at, updated_at FROM workspace_members
+WHERE user_id = $1 AND workspace_id = $2
+`
+
+type GetWorkspaceUserRoleParams struct {
+	UserID      uuid.UUID
+	WorkspaceID uuid.UUID
+}
+
+func (q *Queries) GetWorkspaceUserRole(ctx context.Context, arg GetWorkspaceUserRoleParams) (WorkspaceMember, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceUserRole, arg.UserID, arg.WorkspaceID)
+	var i WorkspaceMember
+	err := row.Scan(
+		&i.UserID,
+		&i.WorkspaceID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const removeMemberFromWorkspace = `-- name: RemoveMemberFromWorkspace :exec
 DELETE FROM workspace_members
 WHERE workspace_id = $1 AND user_id = $2

@@ -1,3 +1,19 @@
+-- nmae: GetCountOfWorkspaceCompletdTask :one
+SELECT COUNT(id) FROM tasks
+WHERE workspace_id = $1 AND status = 'completed';
+
+-- name: GetWorkspaceTotalCountTask :one
+SELECT COUNT(id) FROM tasks
+WHERE workspace_id = $1;
+
+-- name: GetWorkspaceTaskStatusCount :one
+SELECT COUNT(id) FROM tasks
+WHERE status = $1 AND workspace_id = $2;
+
+-- name: GetWorkspaceTaskPriorityCount :one
+SELECT COUNT(id) FROM tasks
+WHERE priority = $1 AND workspace_id = $2;
+
 -- name: CreateNewTask :exec
 INSERT INTO
   tasks (
@@ -19,7 +35,9 @@ DELETE FROM tasks WHERE id = $1;
 
 -- name: GetWorkspaceTasks :many
 SELECT * FROM tasks
-WHERE workspace_id = $1 AND status != 'completed'
+WHERE workspace_id = $1
+AND status != 'completed'
+AND parent_task IS NULL
 ORDER BY created_at DESC
 OFFSET $2
 LIMIT $3;
@@ -35,9 +53,12 @@ ORDER BY created_at DESC
 OFFSET $2
 LIMIT $3;
 
--- nmae: GetWorkspaceCompletedTasks :many
+-- name: GetWorkspaceCompletedTasks :many
 SELECT * FROM tasks
-WHERE workspace_id = $1 AND status = 'completed';
+WHERE workspace_id = $1 AND status = 'completed'
+ORDER BY created_at DESC
+OFFSET $2
+LIMIT $3;
 
 -- name: GetWorkspaceDueTasks :many
 SELECT * FROM tasks
@@ -59,3 +80,33 @@ WHERE created_by = $1 AND workspace_id = $2
 ORDER BY created_at DESC
 OFFSET $3
 LIMIT $4;
+
+-- name: UpdateTaskDue :exec
+UPDATE tasks
+SET due = $1,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = $2 AND status != 'completed';
+
+-- name: UpdateTaskDescription :exec
+UPDATE tasks
+SET description = $1,
+updated_at = CURRENT_TIMESTAMP
+WHERE id = $2;
+
+-- name: UpdateTaskPriority :exec
+UPDATE tasks
+SET priority = $1,
+updated_at = CURRENT_TIMESTAMP
+WHERE id = $2;
+
+-- name: UpdateTaskName :exec
+UPDATE tasks
+SET name = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2;
+
+-- name: UpdateTaskStatus :exec
+UPDATE tasks
+SET status = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2;

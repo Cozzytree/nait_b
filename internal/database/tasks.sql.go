@@ -140,6 +140,56 @@ func (q *Queries) GetTaskById(ctx context.Context, id uuid.UUID) (Task, error) {
 	return i, err
 }
 
+const getWorkspaceCompletedTasks = `-- name: GetWorkspaceCompletedTasks :many
+SELECT id, workspace_id, assignee, created_by, name, description, due, parent_task, status, priority, created_at, updated_at FROM tasks
+WHERE workspace_id = $1 AND status = 'completed'
+ORDER BY created_at DESC
+OFFSET $2
+LIMIT $3
+`
+
+type GetWorkspaceCompletedTasksParams struct {
+	WorkspaceID uuid.UUID
+	Offset      int32
+	Limit       int32
+}
+
+func (q *Queries) GetWorkspaceCompletedTasks(ctx context.Context, arg GetWorkspaceCompletedTasksParams) ([]Task, error) {
+	rows, err := q.db.QueryContext(ctx, getWorkspaceCompletedTasks, arg.WorkspaceID, arg.Offset, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Task
+	for rows.Next() {
+		var i Task
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Assignee,
+			&i.CreatedBy,
+			&i.Name,
+			&i.Description,
+			&i.Due,
+			&i.ParentTask,
+			&i.Status,
+			&i.Priority,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getWorkspaceDueTasks = `-- name: GetWorkspaceDueTasks :many
 SELECT id, workspace_id, assignee, created_by, name, description, due, parent_task, status, priority, created_at, updated_at FROM tasks
 WHERE due > CURRENT_DATE
@@ -189,9 +239,45 @@ func (q *Queries) GetWorkspaceDueTasks(ctx context.Context, arg GetWorkspaceDueT
 	return items, nil
 }
 
+const getWorkspaceTaskPriorityCount = `-- name: GetWorkspaceTaskPriorityCount :one
+SELECT COUNT(id) FROM tasks
+WHERE priority = $1 AND workspace_id = $2
+`
+
+type GetWorkspaceTaskPriorityCountParams struct {
+	Priority    NullTaskPriority
+	WorkspaceID uuid.UUID
+}
+
+func (q *Queries) GetWorkspaceTaskPriorityCount(ctx context.Context, arg GetWorkspaceTaskPriorityCountParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceTaskPriorityCount, arg.Priority, arg.WorkspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const getWorkspaceTaskStatusCount = `-- name: GetWorkspaceTaskStatusCount :one
+SELECT COUNT(id) FROM tasks
+WHERE status = $1 AND workspace_id = $2
+`
+
+type GetWorkspaceTaskStatusCountParams struct {
+	Status      NullTaskStatus
+	WorkspaceID uuid.UUID
+}
+
+func (q *Queries) GetWorkspaceTaskStatusCount(ctx context.Context, arg GetWorkspaceTaskStatusCountParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceTaskStatusCount, arg.Status, arg.WorkspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getWorkspaceTasks = `-- name: GetWorkspaceTasks :many
 SELECT id, workspace_id, assignee, created_by, name, description, due, parent_task, status, priority, created_at, updated_at FROM tasks
-WHERE workspace_id = $1 AND status != 'completed'
+WHERE workspace_id = $1
+AND status != 'completed'
+AND parent_task IS NULL
 ORDER BY created_at DESC
 OFFSET $2
 LIMIT $3
@@ -237,6 +323,18 @@ func (q *Queries) GetWorkspaceTasks(ctx context.Context, arg GetWorkspaceTasksPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const getWorkspaceTotalCountTask = `-- name: GetWorkspaceTotalCountTask :one
+SELECT COUNT(id) FROM tasks
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetWorkspaceTotalCountTask(ctx context.Context, workspaceID uuid.UUID) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceTotalCountTask, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const getWorkspaceUserAssignedTasks = `-- name: GetWorkspaceUserAssignedTasks :many
@@ -349,4 +447,89 @@ func (q *Queries) GetWorkspaceUserCreatedTasks(ctx context.Context, arg GetWorks
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateTaskDescription = `-- name: UpdateTaskDescription :exec
+UPDATE tasks
+SET description = $1,
+updated_at = CURRENT_TIMESTAMP
+WHERE id = $2
+`
+
+type UpdateTaskDescriptionParams struct {
+	Description sql.NullString
+	ID          uuid.UUID
+}
+
+func (q *Queries) UpdateTaskDescription(ctx context.Context, arg UpdateTaskDescriptionParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskDescription, arg.Description, arg.ID)
+	return err
+}
+
+const updateTaskDue = `-- name: UpdateTaskDue :exec
+UPDATE tasks
+SET due = $1,
+  updated_at = CURRENT_TIMESTAMP
+WHERE id = $2 AND status != 'completed'
+`
+
+type UpdateTaskDueParams struct {
+	Due sql.NullTime
+	ID  uuid.UUID
+}
+
+func (q *Queries) UpdateTaskDue(ctx context.Context, arg UpdateTaskDueParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskDue, arg.Due, arg.ID)
+	return err
+}
+
+const updateTaskName = `-- name: UpdateTaskName :exec
+UPDATE tasks
+SET name = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2
+`
+
+type UpdateTaskNameParams struct {
+	Name string
+	ID   uuid.UUID
+}
+
+func (q *Queries) UpdateTaskName(ctx context.Context, arg UpdateTaskNameParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskName, arg.Name, arg.ID)
+	return err
+}
+
+const updateTaskPriority = `-- name: UpdateTaskPriority :exec
+UPDATE tasks
+SET priority = $1,
+updated_at = CURRENT_TIMESTAMP
+WHERE id = $2
+`
+
+type UpdateTaskPriorityParams struct {
+	Priority NullTaskPriority
+	ID       uuid.UUID
+}
+
+func (q *Queries) UpdateTaskPriority(ctx context.Context, arg UpdateTaskPriorityParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskPriority, arg.Priority, arg.ID)
+	return err
+}
+
+const updateTaskStatus = `-- name: UpdateTaskStatus :exec
+UPDATE tasks
+SET status = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2
+`
+
+type UpdateTaskStatusParams struct {
+	Status NullTaskStatus
+	ID     uuid.UUID
+}
+
+func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskStatus, arg.Status, arg.ID)
+	return err
 }

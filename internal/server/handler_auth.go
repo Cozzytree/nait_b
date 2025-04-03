@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Cozzytree/nait/internal/database"
+	"github.com/Cozzytree/nait/internal/utilfunc"
 	"github.com/go-chi/chi/v5"
 	"github.com/markbates/goth/gothic"
 )
@@ -93,6 +94,24 @@ func (s *my_server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 				fmt.Sprintf("%v/%v", os.Getenv("REDIRECT_URL"), fmt.Sprintf("/error?e=%v", err.Error())),
 				http.StatusPermanentRedirect)
 		}
+	}
+
+	// create workspace member
+	err = utilfunc.Retry(3, func() error {
+		err = s.db.CreateNewWorkspaceMember(r.Context(), database.CreateNewWorkspaceMemberParams{
+			UserID:      created_user,
+			WorkspaceID: createdWorkspace,
+			Role:        database.RolesOwner,
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		fmt.Println("error creating membership", err.Error())
+
 	}
 
 	http.Redirect(w, r,

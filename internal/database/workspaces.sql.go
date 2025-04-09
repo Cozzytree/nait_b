@@ -46,6 +46,21 @@ func (q *Queries) CreateNewWorkspaceMember(ctx context.Context, arg CreateNewWor
 	return err
 }
 
+const deleteUserFromWorksapce = `-- name: DeleteUserFromWorksapce :exec
+DELETE FROM workspace_members
+WHERE user_id = $1 AND workspace_id = $2
+`
+
+type DeleteUserFromWorksapceParams struct {
+	UserID      uuid.UUID
+	WorkspaceID uuid.UUID
+}
+
+func (q *Queries) DeleteUserFromWorksapce(ctx context.Context, arg DeleteUserFromWorksapceParams) error {
+	_, err := q.db.ExecContext(ctx, deleteUserFromWorksapce, arg.UserID, arg.WorkspaceID)
+	return err
+}
+
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
 DELETE FROM workspaces WHERE id = $1 AND user_id = $2
 `
@@ -61,25 +76,42 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, arg DeleteWorkspaceParams
 }
 
 const getUserWorkspaces = `-- name: GetUserWorkspaces :many
-SELECT id, user_id, name, created_at, updated_at FROM workspaces
-where user_id = $1
+SELECT mem.user_id, mem.workspace_id, mem.role, mem.created_at, mem.updated_at , jsonb_build_object(
+      'workspace_id', ws.id,
+      'name', ws.name,
+      'created_at', ws.created_at,
+      'updated_at', ws.updated_at
+  ) AS workspace FROM workspace_members AS mem
+LEFT JOIN workspaces AS ws ON mem.workspace_id = ws.id
+WHERE mem.user_id = $1
+ORDER BY mem.created_at
 `
 
-func (q *Queries) GetUserWorkspaces(ctx context.Context, userID uuid.UUID) ([]Workspace, error) {
+type GetUserWorkspacesRow struct {
+	UserID      uuid.UUID
+	WorkspaceID uuid.UUID
+	Role        Roles
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Workspace   json.RawMessage
+}
+
+func (q *Queries) GetUserWorkspaces(ctx context.Context, userID uuid.UUID) ([]GetUserWorkspacesRow, error) {
 	rows, err := q.db.QueryContext(ctx, getUserWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Workspace
+	var items []GetUserWorkspacesRow
 	for rows.Next() {
-		var i Workspace
+		var i GetUserWorkspacesRow
 		if err := rows.Scan(
-			&i.ID,
 			&i.UserID,
-			&i.Name,
+			&i.WorkspaceID,
+			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Workspace,
 		); err != nil {
 			return nil, err
 		}
@@ -95,16 +127,11 @@ func (q *Queries) GetUserWorkspaces(ctx context.Context, userID uuid.UUID) ([]Wo
 }
 
 const getWorkspaceByID = `-- name: GetWorkspaceByID :one
-SELECT id, user_id, name, created_at, updated_at FROM workspaces WHERE id = $1 AND user_id = $2
+SELECT id, user_id, name, created_at, updated_at FROM workspaces WHERE id = $1
 `
 
-type GetWorkspaceByIDParams struct {
-	ID     uuid.UUID
-	UserID uuid.UUID
-}
-
-func (q *Queries) GetWorkspaceByID(ctx context.Context, arg GetWorkspaceByIDParams) (Workspace, error) {
-	row := q.db.QueryRowContext(ctx, getWorkspaceByID, arg.ID, arg.UserID)
+func (q *Queries) GetWorkspaceByID(ctx context.Context, id uuid.UUID) (Workspace, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceByID, id)
 	var i Workspace
 	err := row.Scan(
 		&i.ID,

@@ -162,6 +162,17 @@ type Comment struct {
 	Content       string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	TaskID        uuid.UUID
+}
+
+type Link struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	ValidUntil  time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Link        string
+	Role        Roles
 }
 
 type Page struct {

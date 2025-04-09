@@ -2,6 +2,14 @@
 SELECT COUNT(id) FROM tasks
 WHERE workspace_id = $1 AND status = 'completed';
 
+-- name: GetWorkspaceUserAssignedTaskCount :one
+SELECT COUNT(id) FROM tasks
+WHERE assignee IS NOT NULL AND workspace_id = $1 AND assignee = $2;
+
+-- name: GetWorkspaceUserCreatedTaskCount :one
+SELECT COUNT(id) FROM tasks
+WHERE created_by IS NOT NULL AND workspace_id = $1 AND created_by = $2;
+
 -- name: GetWorkspaceTotalCountTask :one
 SELECT COUNT(id) FROM tasks
 WHERE workspace_id = $1;
@@ -43,8 +51,19 @@ OFFSET $2
 LIMIT $3;
 
 -- name: GetTaskById :one
-SELECT * FROM tasks
-WHERE id = $1;
+SELECT t.*, jsonb_build_object(
+           'username', au.name,
+           'email', au.email,
+           'avatar', au.avatar) AS assigned,
+           jsonb_build_object(
+           'username', cu.name,
+           'email', cu.email,
+           'avatar', cu.avatar) AS created
+FROM tasks AS t
+LEFT JOIN users AS au ON t.assignee = au.id
+LEFT JOIN users AS cu ON t.created_by = cu.id
+WHERE t.id = $1;
+
 
 -- name: GetChildTasks :many
 SELECT * FROM tasks
@@ -108,5 +127,17 @@ WHERE id = $2;
 -- name: UpdateTaskStatus :exec
 UPDATE tasks
 SET status = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2;
+
+-- name: UpdateTaskAssignee :exec
+UPDATE tasks
+SET assignee = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2;
+
+-- name: UpdateTaskCreated :exec
+UPDATE tasks
+SET created_by = $1,
     updated_at = CURRENT_TIMESTAMP
 WHERE id = $2;

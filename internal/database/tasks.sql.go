@@ -8,6 +8,8 @@ package database
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -116,13 +118,40 @@ func (q *Queries) GetChildTasks(ctx context.Context, arg GetChildTasksParams) ([
 }
 
 const getTaskById = `-- name: GetTaskById :one
-SELECT id, workspace_id, assignee, created_by, name, description, due, parent_task, status, priority, created_at, updated_at FROM tasks
-WHERE id = $1
+SELECT t.id, t.workspace_id, t.assignee, t.created_by, t.name, t.description, t.due, t.parent_task, t.status, t.priority, t.created_at, t.updated_at, jsonb_build_object(
+           'username', au.name,
+           'email', au.email,
+           'avatar', au.avatar) AS assigned,
+           jsonb_build_object(
+           'username', cu.name,
+           'email', cu.email,
+           'avatar', cu.avatar) AS created
+FROM tasks AS t
+LEFT JOIN users AS au ON t.assignee = au.id
+LEFT JOIN users AS cu ON t.created_by = cu.id
+WHERE t.id = $1
 `
 
-func (q *Queries) GetTaskById(ctx context.Context, id uuid.UUID) (Task, error) {
+type GetTaskByIdRow struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	Assignee    uuid.NullUUID
+	CreatedBy   uuid.NullUUID
+	Name        string
+	Description sql.NullString
+	Due         sql.NullTime
+	ParentTask  uuid.NullUUID
+	Status      NullTaskStatus
+	Priority    NullTaskPriority
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Assigned    json.RawMessage
+	Created     json.RawMessage
+}
+
+func (q *Queries) GetTaskById(ctx context.Context, id uuid.UUID) (GetTaskByIdRow, error) {
 	row := q.db.QueryRowContext(ctx, getTaskById, id)
-	var i Task
+	var i GetTaskByIdRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -136,6 +165,8 @@ func (q *Queries) GetTaskById(ctx context.Context, id uuid.UUID) (Task, error) {
 		&i.Priority,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Assigned,
+		&i.Created,
 	)
 	return i, err
 }
@@ -337,6 +368,23 @@ func (q *Queries) GetWorkspaceTotalCountTask(ctx context.Context, workspaceID uu
 	return count, err
 }
 
+const getWorkspaceUserAssignedTaskCount = `-- name: GetWorkspaceUserAssignedTaskCount :one
+SELECT COUNT(id) FROM tasks
+WHERE assignee IS NOT NULL AND workspace_id = $1 AND assignee = $2
+`
+
+type GetWorkspaceUserAssignedTaskCountParams struct {
+	WorkspaceID uuid.UUID
+	Assignee    uuid.NullUUID
+}
+
+func (q *Queries) GetWorkspaceUserAssignedTaskCount(ctx context.Context, arg GetWorkspaceUserAssignedTaskCountParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceUserAssignedTaskCount, arg.WorkspaceID, arg.Assignee)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getWorkspaceUserAssignedTasks = `-- name: GetWorkspaceUserAssignedTasks :many
 SELECT id, workspace_id, assignee, created_by, name, description, due, parent_task, status, priority, created_at, updated_at FROM tasks
 WHERE assignee = $1 AND workspace_id = $2
@@ -393,6 +441,23 @@ func (q *Queries) GetWorkspaceUserAssignedTasks(ctx context.Context, arg GetWork
 	return items, nil
 }
 
+const getWorkspaceUserCreatedTaskCount = `-- name: GetWorkspaceUserCreatedTaskCount :one
+SELECT COUNT(id) FROM tasks
+WHERE created_by IS NOT NULL AND workspace_id = $1 AND created_by = $2
+`
+
+type GetWorkspaceUserCreatedTaskCountParams struct {
+	WorkspaceID uuid.UUID
+	CreatedBy   uuid.NullUUID
+}
+
+func (q *Queries) GetWorkspaceUserCreatedTaskCount(ctx context.Context, arg GetWorkspaceUserCreatedTaskCountParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getWorkspaceUserCreatedTaskCount, arg.WorkspaceID, arg.CreatedBy)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getWorkspaceUserCreatedTasks = `-- name: GetWorkspaceUserCreatedTasks :many
 SELECT id, workspace_id, assignee, created_by, name, description, due, parent_task, status, priority, created_at, updated_at FROM tasks
 WHERE created_by = $1 AND workspace_id = $2
@@ -447,6 +512,40 @@ func (q *Queries) GetWorkspaceUserCreatedTasks(ctx context.Context, arg GetWorks
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateTaskAssignee = `-- name: UpdateTaskAssignee :exec
+UPDATE tasks
+SET assignee = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2
+`
+
+type UpdateTaskAssigneeParams struct {
+	Assignee uuid.NullUUID
+	ID       uuid.UUID
+}
+
+func (q *Queries) UpdateTaskAssignee(ctx context.Context, arg UpdateTaskAssigneeParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskAssignee, arg.Assignee, arg.ID)
+	return err
+}
+
+const updateTaskCreated = `-- name: UpdateTaskCreated :exec
+UPDATE tasks
+SET created_by = $1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $2
+`
+
+type UpdateTaskCreatedParams struct {
+	CreatedBy uuid.NullUUID
+	ID        uuid.UUID
+}
+
+func (q *Queries) UpdateTaskCreated(ctx context.Context, arg UpdateTaskCreatedParams) error {
+	_, err := q.db.ExecContext(ctx, updateTaskCreated, arg.CreatedBy, arg.ID)
+	return err
 }
 
 const updateTaskDescription = `-- name: UpdateTaskDescription :exec

@@ -39,6 +39,7 @@ func (s *my_server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		log.Println("session error ", err.Error())
 	}
 
+	// session.Values[fmt.Sprintf("%s", user.UserID)] = user.UserID
 	session.Values["user_id"] = user.UserID
 	session.Values["accessToken"] = user.AccessToken
 	session.Values["refreshToken"] = user.RefreshToken

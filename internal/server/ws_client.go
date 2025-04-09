@@ -17,6 +17,9 @@ const (
 	writeWait = 10 * time.Second
 )
 
+type packet struct {
+}
+
 type ws_client struct {
 	hub      *hub
 	id       uuid.UUID

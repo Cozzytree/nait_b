@@ -49,17 +49,13 @@ func (ms *my_server) handleCreatePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ms *my_server) handleGetWorkspacePages(w http.ResponseWriter, r *http.Request, user database.User) {
-	id := r.PathValue("workspace_id")
-	workspace_id, err := uuid.Parse(id)
+	workspace_id, err := uuid.Parse(r.PathValue("workspace_id"))
 	if err != nil {
 		ResponseWithError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	workspace, err := ms.db.GetWorkspaceByID(r.Context(), database.GetWorkspaceByIDParams{
-		ID:     workspace_id,
-		UserID: user.ID,
-	})
+	workspace, err := ms.db.GetWorkspaceByID(r.Context(), workspace_id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Workspace not found", http.StatusNotFound)
@@ -82,8 +78,7 @@ func (ms *my_server) handleGetWorkspacePages(w http.ResponseWriter, r *http.Requ
 }
 
 func (ms *my_server) handleDeletePage(w http.ResponseWriter, r *http.Request, user database.User) {
-	id := r.PathValue("workspace_id")
-	workspace_id, err := uuid.Parse(id)
+	workspace_id, err := uuid.Parse(r.PathValue("workspace_id"))
 	if err != nil {
 		ResponseWithError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -106,10 +101,7 @@ func (ms *my_server) handleDeletePage(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 
-	workspace, err := ms.db.GetWorkspaceByID(r.Context(), database.GetWorkspaceByIDParams{
-		ID:     workspace_id,
-		UserID: user.ID,
-	})
+	workspace, err := ms.db.GetWorkspaceByID(r.Context(), workspace_id)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Workspace not found", http.StatusNotFound)

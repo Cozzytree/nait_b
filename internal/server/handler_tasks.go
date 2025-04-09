@@ -70,8 +70,10 @@ func (ms *my_server) handleCreateTask(w http.ResponseWriter, r *http.Request, us
 			Valid:        b.Priority != "",
 		},
 	})
+
 	if err != nil {
-		ResponseWithError(w, "errow while creating task", http.StatusInternalServerError)
+		fmt.Println("error task craation", err)
+		ResponseWithError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -91,16 +93,29 @@ func (ms *my_server) handleGetWorkspaceTasks(w http.ResponseWriter, r *http.Requ
 	}
 
 	tasks, err := ms.db.GetWorkspaceTasks(r.Context(), database.GetWorkspaceTasksParams{
-		Offset:      int32(offset),
+		Offset:      offset,
 		WorkspaceID: workspace_id,
-		Limit:       int32(limit),
+		Limit:       limit,
 	})
 	if err != nil {
 		ResponseWithError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	taskCount, err := ms.db.GetWorkspaceTotalCountTask(r.Context(), workspace_id)
+	if err != nil {
+		fmt.Println("count error", err.Error())
+	}
+	resStruct := struct {
+		TotalCount int64        `json:"total_count"`
+		Data       []model.Task `json:"data"`
+	}{
+		TotalCount: taskCount,
+		Data:       model.DatabaseTasksToTasks(tasks),
+	}
+
 	ResponseWithJson(w, Response{
-		Data:   model.DatabaseTasksToTasks(tasks),
+		Data:   resStruct,
 		Status: 200,
 	})
 }
@@ -130,8 +145,28 @@ func (ms *my_server) handleGetWorkspaceCompletedTask(
 		ResponseWithError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	taskCount, err := ms.db.GetWorkspaceTaskStatusCount(r.Context(), database.GetWorkspaceTaskStatusCountParams{
+		Status: database.NullTaskStatus{
+			TaskStatus: database.TaskStatusCompleted,
+			Valid:      true,
+		},
+		WorkspaceID: workspace_id,
+	})
+	if err != nil {
+		fmt.Println("count error", err.Error())
+	}
+
+	resStruct := struct {
+		TotalCount int64        `json:"total_count"`
+		Data       []model.Task `json:"data"`
+	}{
+		TotalCount: taskCount,
+		Data:       model.DatabaseTasksToTasks(tasks),
+	}
+
 	ResponseWithJson(w, Response{
-		Data:   model.DatabaseTasksToTasks(tasks),
+		Data:   resStruct,
 		Status: 200,
 	})
 }
@@ -154,7 +189,7 @@ func (ms *my_server) handleUpdateTaskDesciption(
 	}
 
 	task, err := ms.db.GetTaskById(r.Context(), task_id)
-	if user_role == database.RolesMember && task.Assignee.UUID != user.ID {
+	if user_role == database.RolesMember && task.Assignee.UUID != user.ID && task.CreatedBy.UUID != user.ID {
 		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -203,7 +238,7 @@ func (ms *my_server) handleUpdateTaskPriority(
 	}
 
 	task, err := ms.db.GetTaskById(r.Context(), task_id)
-	if user_role == database.RolesMember && task.Assignee.UUID != user.ID {
+	if user_role == database.RolesMember && task.Assignee.UUID != user.ID && task.CreatedBy.UUID != user.ID {
 		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -252,7 +287,7 @@ func (ms *my_server) handleUpdateTaskName(
 	}
 
 	task, err := ms.db.GetTaskById(r.Context(), task_id)
-	if user_role == database.RolesMember && task.Assignee.UUID != user.ID {
+	if user_role == database.RolesMember && task.Assignee.UUID != user.ID && task.CreatedBy.UUID != user.ID {
 		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -305,7 +340,7 @@ func (ms *my_server) handleUpdateTaskStatus(
 	}
 
 	task, err := ms.db.GetTaskById(r.Context(), task_id)
-	if user_role == database.RolesMember && task.Assignee.UUID != user.ID {
+	if user_role == database.RolesMember && task.Assignee.UUID != user.ID && task.CreatedBy.UUID != user.ID {
 		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -340,8 +375,7 @@ func (ms *my_server) handleUpdateTaskStatus(
 func (ms *my_server) handleUpdateTaskDue(
 	w http.ResponseWriter, r *http.Request, user database.User,
 ) {
-	id := r.PathValue("task_id")
-	task_id, err := uuid.Parse(id)
+	task_id, err := uuid.Parse(r.PathValue("task_id"))
 	if err != nil {
 		ResponseWithError(w, "invalid task id", http.StatusBadRequest)
 		return
@@ -355,7 +389,7 @@ func (ms *my_server) handleUpdateTaskDue(
 	}
 
 	task, err := ms.db.GetTaskById(r.Context(), task_id)
-	if user_role == database.RolesMember && task.Assignee.UUID != user.ID {
+	if user_role == database.RolesMember && task.Assignee.UUID != user.ID && task.CreatedBy.UUID != user.ID {
 		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -392,6 +426,59 @@ func (ms *my_server) handleUpdateTaskDue(
 		ResponseWithError(w, "error while updating task", http.StatusInternalServerError)
 		return
 	}
+
+	ResponseWithJson(w, Response{
+		Status: 200,
+	})
+}
+
+func (ms *my_server) handleUpdateTaskAssignee(
+	w http.ResponseWriter, r *http.Request, user database.User,
+) {
+	task_id, err := uuid.Parse(r.PathValue("task_id"))
+	if err != nil {
+		ResponseWithError(w, "invalid task id", http.StatusBadRequest)
+		return
+	}
+
+	role := r.Context().Value("user_role")
+	user_role, ok := role.(database.Roles)
+	if !ok {
+		ResponseWithError(w, "invalid user role", http.StatusBadRequest)
+		return
+	}
+
+	task, err := ms.db.GetTaskById(r.Context(), task_id)
+	if user_role == database.RolesMember && task.Assignee.UUID != user.ID && task.CreatedBy.UUID != user.ID {
+		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	body := struct {
+		Assignee uuid.NullUUID `json:"assignee" validate:"required"`
+	}{}
+
+	err = json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		ResponseWithError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = utilfunc.Validate(body)
+	if err != nil {
+		ResponseWithError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = ms.db.UpdateTaskAssignee(r.Context(), database.UpdateTaskAssigneeParams{
+		Assignee: body.Assignee,
+		ID:       task.ID,
+	})
+
+	if err != nil {
+		ResponseWithError(w, "error while updating assignee", http.StatusInternalServerError)
+		return
+	}
 	ResponseWithJson(w, Response{
 		Status: 200,
 	})
@@ -400,8 +487,7 @@ func (ms *my_server) handleUpdateTaskDue(
 func (ms *my_server) handleGetTask(
 	w http.ResponseWriter, r *http.Request, _ database.User,
 ) {
-	id := r.PathValue("task_id")
-	task_id, err := uuid.Parse(id)
+	task_id, err := uuid.Parse(r.PathValue("task_id"))
 	if err != nil {
 		ResponseWithError(w, "invalid task id", http.StatusBadRequest)
 		return
@@ -421,7 +507,7 @@ func (ms *my_server) handleGetTask(
 	}
 
 	ResponseWithJson(w, Response{
-		Data:   model.DatabaseTaskToTask(task),
+		Data:   model.DatabseGetTaskByIdToGetTaskById(task),
 		Status: 200,
 	})
 }
@@ -429,8 +515,7 @@ func (ms *my_server) handleGetTask(
 func (ms *my_server) handleGetChildTasks(
 	w http.ResponseWriter, r *http.Request, _ database.User,
 ) {
-	id := r.PathValue("task_id")
-	task_id, err := uuid.Parse(id)
+	task_id, err := uuid.Parse(r.PathValue("task_id"))
 	if err != nil {
 		ResponseWithError(w, "invalid task id", http.StatusBadRequest)
 		return
@@ -460,8 +545,7 @@ func (ms *my_server) handleGetChildTasks(
 func (ms *my_server) handleDeleteTask(
 	w http.ResponseWriter, r *http.Request, user database.User,
 ) {
-	id := r.PathValue("task_id")
-	task_id, err := uuid.Parse(id)
+	task_id, err := uuid.Parse(r.PathValue("task_id"))
 	if err != nil {
 		ResponseWithError(w, "invalid task id", http.StatusBadRequest)
 		return
@@ -505,8 +589,7 @@ func (ms *my_server) handleDeleteTask(
 func (ms *my_server) handleGetTotalTaskCount(
 	w http.ResponseWriter, r *http.Request, _ database.User,
 ) {
-	w_id := r.PathValue("workspace_id")
-	workspace_id, _ := uuid.Parse(w_id)
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
 
 	// utilfunc.Validate(val any)
 	count, err := ms.db.GetWorkspaceTotalCountTask(r.Context(), workspace_id)
@@ -523,8 +606,7 @@ func (ms *my_server) handleGetTotalTaskCount(
 func (ms *my_server) handleGetWorkspaceTaskStatusCount(
 	w http.ResponseWriter, r *http.Request, _ database.User,
 ) {
-	w_id := r.PathValue("workspace_id")
-	workspace_id, _ := uuid.Parse(w_id)
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
 
 	s := r.PathValue("status")
 
@@ -553,12 +635,9 @@ func (ms *my_server) handleGetWorkspaceTaskStatusCount(
 func (ms *my_server) handleGetWorkspaceTaskPriorityCount(
 	w http.ResponseWriter, r *http.Request, _ database.User,
 ) {
-	w_id := r.PathValue("workspace_id")
-	workspace_id, _ := uuid.Parse(w_id)
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
 
-	s := r.PathValue("priority")
-
-	priority := database.TaskPriority(s)
+	priority := database.TaskPriority(r.PathValue("priority"))
 
 	// utilfunc.Validate(val any)
 
@@ -583,8 +662,7 @@ func (ms *my_server) handleGetWorkspaceTaskPriorityCount(
 func (ms *my_server) handleGetWorkspaceUsersAssignedTask(
 	w http.ResponseWriter, r *http.Request, user database.User,
 ) {
-	w_id := r.PathValue("workspace_id")
-	workspace_id, _ := uuid.Parse(w_id)
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
 
 	offset, limit := utilfunc.GetOffsetAndLimitFromReq(r)
 	assignedTasks, err := ms.db.GetWorkspaceUserAssignedTasks(r.Context(), database.GetWorkspaceUserAssignedTasksParams{
@@ -601,8 +679,26 @@ func (ms *my_server) handleGetWorkspaceUsersAssignedTask(
 		return
 	}
 
+	taskCount, err := ms.db.GetWorkspaceUserAssignedTaskCount(r.Context(), database.GetWorkspaceUserAssignedTaskCountParams{
+		WorkspaceID: workspace_id,
+		Assignee: uuid.NullUUID{
+			UUID:  user.ID,
+			Valid: true,
+		},
+	})
+	if err != nil {
+		fmt.Println("count error", err.Error())
+	}
+	resStruct := struct {
+		TotalCount int64        `json:"total_count"`
+		Data       []model.Task `json:"data"`
+	}{
+		TotalCount: taskCount,
+		Data:       model.DatabaseTasksToTasks(assignedTasks),
+	}
+
 	ResponseWithJson(w, Response{
-		Data:   model.DatabaseTasksToTasks(assignedTasks),
+		Data:   resStruct,
 		Status: 200,
 	})
 }
@@ -614,7 +710,7 @@ func (ms *my_server) handleGetWorkspaceUsersCreatedTask(
 	workspace_id, _ := uuid.Parse(w_id)
 
 	offset, limit := utilfunc.GetOffsetAndLimitFromReq(r)
-	assignedTasks, err := ms.db.GetWorkspaceUserCreatedTasks(r.Context(), database.GetWorkspaceUserCreatedTasksParams{
+	createdTasks, err := ms.db.GetWorkspaceUserCreatedTasks(r.Context(), database.GetWorkspaceUserCreatedTasksParams{
 		CreatedBy: uuid.NullUUID{
 			UUID:  user.ID,
 			Valid: true,
@@ -628,8 +724,26 @@ func (ms *my_server) handleGetWorkspaceUsersCreatedTask(
 		return
 	}
 
+	taskCount, err := ms.db.GetWorkspaceUserCreatedTaskCount(r.Context(), database.GetWorkspaceUserCreatedTaskCountParams{
+		WorkspaceID: workspace_id,
+		CreatedBy: uuid.NullUUID{
+			UUID:  user.ID,
+			Valid: true,
+		},
+	})
+	if err != nil {
+		fmt.Println("count error", err.Error())
+	}
+	resStruct := struct {
+		TotalCount int64        `json:"total_count"`
+		Data       []model.Task `json:"data"`
+	}{
+		TotalCount: taskCount,
+		Data:       model.DatabaseTasksToTasks(createdTasks),
+	}
+
 	ResponseWithJson(w, Response{
-		Data:   model.DatabaseTasksToTasks(assignedTasks),
+		Data:   resStruct,
 		Status: 200,
 	})
 }

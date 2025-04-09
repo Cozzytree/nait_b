@@ -82,11 +82,7 @@ func Validate(val any) error {
 
 // offset , limit
 func GetOffsetAndLimitFromReq(r *http.Request) (int32, int32) {
-	page_no_str := r.URL.Query().Get("page")
-	page_no, err := strconv.Atoi(page_no_str)
-	if err != nil {
-		page_no = 0
-	}
+	var offset int32
 
 	limit_str := r.URL.Query().Get("limit")
 	limit, err := strconv.Atoi(limit_str)
@@ -94,7 +90,14 @@ func GetOffsetAndLimitFromReq(r *http.Request) (int32, int32) {
 		limit = DEFAULT_LIMIT
 	}
 
-	offset := page_no * limit
+	page_no_str := r.URL.Query().Get("page")
+	page_no, err := strconv.Atoi(page_no_str)
+	if err != nil {
+		page_no = 0
+		offset = int32(page_no * limit)
+	} else {
+		offset = int32((page_no - 1) * limit)
+	}
 
 	return int32(offset), int32(limit)
 }

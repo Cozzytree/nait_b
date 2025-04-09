@@ -7,6 +7,7 @@ import (
 
 	"github.com/Cozzytree/nait/internal/database"
 	"github.com/Cozzytree/nait/internal/model"
+	"github.com/Cozzytree/nait/internal/utilfunc"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +32,29 @@ func (ms *my_server) handleCreateWorkspace(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	err = utilfunc.Retry(3, func() error {
+		err = ms.db.CreateNewWorkspaceMember(r.Context(), database.CreateNewWorkspaceMemberParams{
+			UserID:      user.ID,
+			WorkspaceID: created_id,
+			Role:        database.RolesOwner,
+		})
+		if err != nil {
+			return err
+		} else {
+			return nil
+		}
+	})
+	if err != nil {
+		err = ms.db.DeleteWorkspace(r.Context(), database.DeleteWorkspaceParams{
+			ID:     created_id,
+			UserID: user.ID,
+		})
+		if err != nil {
+			ResponseWithError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	ResponseWithJson(w, Response{
 		Data:   created_id,
 		Status: 201,
@@ -45,20 +69,27 @@ func (ms *my_server) handleGetUserWorkspaces(w http.ResponseWriter, r *http.Requ
 	}
 
 	ResponseWithJson(w, Response{
-		Data:   model.UserWorkspaceFromDatabaseRows(user_workspaces),
+		Data:   model.DatabaseUserWorkspaceToUserWorkspaces(user_workspaces),
 		Status: 200,
 	})
 }
 
 func (ms *my_server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request, user database.User) {
-	id := r.PathValue("workspace_id")
-	workspace_id, err := uuid.Parse(id)
-	if err != nil {
-		ResponseWithError(w, err.Error(), http.StatusBadRequest)
+	role_from_ctx := r.Context().Value("user_role")
+
+	role, ok := role_from_ctx.(string)
+	if !ok {
+		ResponseWithError(w, "invalid role", http.StatusBadRequest)
+		return
+	}
+	if role != "admin" {
+		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	err = ms.db.DeleteWorkspace(r.Context(), database.DeleteWorkspaceParams{
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
+
+	err := ms.db.DeleteWorkspace(r.Context(), database.DeleteWorkspaceParams{
 		ID:     workspace_id,
 		UserID: user.ID,
 	})
@@ -89,6 +120,61 @@ func (ms *my_server) handleGetWorkspaceMembers(
 
 	ResponseWithJson(w, Response{
 		Data:   model.DatabaseWorkspaceMtoWorkspaceM(workspaceMembers),
+		Status: 200,
+	})
+}
+
+func (ms *my_server) handleGetWorkspaceWithRole(
+	w http.ResponseWriter, r *http.Request, user database.User,
+) {
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
+
+	workspace, err := ms.db.GetWorkspaceUserRole(r.Context(), database.GetWorkspaceUserRoleParams{
+		WorkspaceID: workspace_id,
+		UserID:      user.ID,
+	})
+	if err != nil {
+		ResponseWithError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	ResponseWithJson(w, Response{
+		Data:   model.DatabaseMemberToMember(workspace),
+		Status: 200,
+	})
+}
+
+func (ms *my_server) handleDeleteUserFromWorksapce(
+	w http.ResponseWriter, r *http.Request, user database.User,
+) {
+	role_from_ctx := r.Context().Value("user_role")
+	userToRemove, err := uuid.Parse(r.PathValue("to_remove"))
+	if err != nil {
+		ResponseWithError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	role, ok := role_from_ctx.(database.Roles)
+	if !ok {
+		ResponseWithError(w, "invalid role", http.StatusBadRequest)
+		return
+	}
+	if role != database.RolesAdmin && role != database.RolesOwner {
+		ResponseWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	workspace_id, _ := uuid.Parse(r.PathValue("workspace_id"))
+
+	err = ms.db.DeleteUserFromWorksapce(r.Context(), database.DeleteUserFromWorksapceParams{
+		UserID:      userToRemove,
+		WorkspaceID: workspace_id,
+	})
+	if err != nil {
+		ResponseWithError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	ResponseWithJson(w, Response{
 		Status: 200,
 	})
 }
